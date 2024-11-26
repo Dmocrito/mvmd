@@ -93,7 +93,7 @@ def mvmd(signal, K, alpha, tol=1e-3, init=0, tau=1e-2, DC=False):
     sum_uk = np.zeros((C, T), dtype=complex)  # Accumulator
 
     # Main loop of MVMD
-    while uDiff > tol and n < N:
+    while uDiff > tol and n < N - 1:
         sum_uDiff = 0.
 
         # Loop over the modes
@@ -134,7 +134,11 @@ def mvmd(signal, K, alpha, tol=1e-3, init=0, tau=1e-2, DC=False):
         
 
     # Post-processing
-    omega = omega_plus[:n, :]
+    omega = omega_plus[:n, :] / fs
+
+    # Order the results of omoga list, based on the final result
+    idx = np.argsort(omega[-1, :])
+    omega = omega[:, idx]
 
     # Signal reconstruction
     u_hat_full = np.zeros((K, C, T), dtype=complex)
@@ -150,6 +154,9 @@ def mvmd(signal, K, alpha, tol=1e-3, init=0, tau=1e-2, DC=False):
         for c in range(C):
             u_temp = np.fft.ifft(np.fft.ifftshift(u_hat_full[k, c, :]))
             u[k, c, :] = np.real(u_temp)
+
+    # Order modes
+    u = u[idx, :, :]
 
     # Remove mirror part
     T4 = T // 4
