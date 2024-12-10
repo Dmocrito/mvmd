@@ -121,10 +121,10 @@ def mvmd(signal, K, alpha, tol=1e-3, init=0, tau=1e-2, DC=False):
 
                 omega_plus[n + 1, k] = numerator / denominator
 
-        # Dual ascent
-        lambda_hat[n+1, :, :] = (
-            lambda_hat[n, :, :] + tau * (np.sum(u_hat_plus, axis=0) - f_hat_plus)
-        )
+            # Dual ascent
+            lambda_hat[n+1, :, :] = (
+                lambda_hat[n, :, :] + tau * (np.sum(u_hat_plus, axis=0) - f_hat_plus)
+            )
          
         # Loop counter update
         n += 1
