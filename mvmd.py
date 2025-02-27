@@ -141,8 +141,6 @@ def _to_freq_domain(signal, pad_mode='symmetric'):
     else:
         full_signal = np.pad(signal, pad_width=((0, 0), (tpoints // 2, tpoints - tpoints // 2)), mode=pad_mode)
 
-    print(len(full_signal[0]))
-
     signal_hat = np.fft.fft(full_signal, axis=1)[:, :tpoints + 1]
 
     return signal_hat
