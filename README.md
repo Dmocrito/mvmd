@@ -5,7 +5,8 @@ This code provides an implementation of the Multivariate Variational Mode Decomp
 ## Features
 
 - Decompose a multivariate signal into their intrinsic oscillatory modes
-- Option to keep the first mode at DC (0 frequency)
+- Option to initialize center frequencies in different ways (constant, linear, or exponential)
+- Verbose mode to print convergence information
 
 ## Requirements
 - NumPy
@@ -29,18 +30,18 @@ from mvmd import mvmd
 signal = np.random.rand(3, 100)  # 3 channels, 100 samples
 
 # Decompose the signal
-u, u_hat, omega = mvmd(signal, K=3, alpha=2000, tol=1e-3)
+modes, modes_hat, omega = mvmd(signal, num_modes=3, alpha=2000, tolerance=1e-3)
 ```
 
 ## Parameters
 
 - `signal` : ndarray
   - Input multivariate signal to be decomposed (channels x samples).
-- `K` : int
+- `num_modes` : int
   - Number of modes to be recovered.
 - `alpha` : float
   - Bandwidth constraint parameter.
-- `tol` : float
+- `tolerance` : float
   - Stopping criterion for the dual ascent.
 
 **Optional parameters**
@@ -48,11 +49,20 @@ u, u_hat, omega = mvmd(signal, K=3, alpha=2000, tol=1e-3)
   - Initialization method for center frequencies:
     - 0: All initial frequency guesses start at 0.
     - 1: All initial frequency guesses are set uniformly.
-    - 2: All initial frequency guesses are set randomly.
+    - 2: All initial frequency guesses are set exponentially.
 - `tau` : float
   - Time-step of the dual ascent (use 0 for noise-slack).
-- `DC` : bool
-  - If True, the first mode is kept at DC (0 frequency).
+- `verbose` : bool
+  - If True, print information about the convergence of the algorithm.
+
+## Returns
+
+- `modes` : ndarray
+  - The collection of decomposed modes (K x C x T).
+- `modes_hat` : ndarray
+  - Spectra of the modes (K x C x F).
+- `omega` : ndarray
+  - Estimated mode center-frequencies (iter x K).
 
 ## License
 

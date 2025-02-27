@@ -1,40 +1,39 @@
 import numpy as np
 
-def mvmd(signal, K, alpha, tol=1e-3, init=0, tau=1e-2, DC=False):
+def mvmd(signal, num_modes, alpha, tolerance=1e-3, init=0, tau=1e-2, verbose=False):
     """
     Multivariate Variational Mode Decomposition (MVMD)
-    
+
     The function MVMD applies the "Multivariate Variational Mode Decomposition (MVMD)" algorithm to multivariate or multichannel data sets from [1].
-    
+
     Parameters:
     -----------
     signal : ndarray
-        Input multivariate signal to be decomposed (channels x samples).
-            It assumes that: channels < samples 
-    K : int
+        Input multivariate signal to be decomposed (channels x samples)
+    num_modes : int
         Number of modes to be recovered.
     alpha : float
         Bandwidth constraint parameter.
-    tol : float
+    tolerance : float
         Stopping criterion for the dual ascent
     init : int
         Initialization method for center frequencies:
             - 0: All omegas start at 0.
-            - 1: All omegas are initialized uniformly.
-            - 2: All omegas are initialized randomly.
+            - 1: All omegas are initialized lineary distributed.
+            - 2: All omegas are initialized exponentially distributed.
     tau : float
         Time-step of the dual ascent (use 0 for noise-slack).
-    DC : bool
-        If True, the first mode is kept at DC (0 frequency).
-    
+    verbose : bool
+        Print information about the convergence of the algorithm.
+
     Returns:
     --------
-    u : ndarray
+    modes : ndarray
         The collection of decomposed modes (K x C x T).
-    u_hat : ndarray
-        Spectra of the modes (K x C x N).
+    modes_hat : ndarray
+        Spectra of the modes (K x C x F).
     omega : ndarray
-        Estimated mode center-frequencies (N_iter x K).
+        Estimated mode center-frequencies (iter x K).
 
     
     This is a Python implementation of the algorithm described in:
@@ -42,131 +41,127 @@ def mvmd(signal, K, alpha, tol=1e-3, init=0, tau=1e-2, DC=False):
     [1] N. Rehman and H. Aftab (2019) Multivariate Variational Mode Decomposition, IEEE Transactions on Signal Processing
     """
     # Variables
-    N = 500 # Maximum number of iterations
+    max_iter = 500 # Maximum number of iterations
 
-    # Check diminsions (transpose if nescessary)
-    if signal.shape[0] < signal.shape[1]: # It assumes that: channels < samples
-        C, T = signal.shape
-    else:
-        T, C = signal.shape
-        signal = signal.T
+    # Extract dimensions -> assumes that the signal is shaped channels x time-points
+    if signal is None or not isinstance(signal, np.ndarray) or signal.ndim != 2:
+        raise ValueError("Signal must be a non-empty 2D numpy array (channels x t-points)" )
 
-    #--- Preprocessing steps ---
-    fs = 1.0 / T  # Sampling frequency
+    num_channels, num_tpoints = signal.shape
 
-    # Mirroring - To avoid edge interferring effects
-    #     > mMm 14-Oct-2016 - I optimize this part into a single line by using 
-    #     the np.pad function instead of using indices.
-    f = np.pad(signal, ((0, 0), (T//2, T - T//2)), mode='symmetric')
-
-    # Time domain and frequencies
-    T = f.shape[1]
-    t_points = np.arange(1, T + 1) / T
-    f_points = t_points - 0.5 - 1.0 / T
-
-    # Construct and center f_hat
-    f_hat = np.fft.fftshift(np.fft.fft(f, axis=1), axes=1)
-    f_hat_plus = f_hat.copy()
-    f_hat_plus[:, :T // 2] = 0
-
-    u_hat_new = np.zeros((C, T), dtype=complex) 
-    u_hat_plus = np.zeros((K, C, T), dtype=complex)
-    omega_plus = np.zeros((N, K))
+    # Show dimensionality of the problem
+    if verbose:
+        print(
+            f'___Parameters___ \n'
+            f'Signal - Channels: {num_channels} Timepoints: {num_tpoints} \n'
+            f' Model - Number of modes: {num_modes} ')
 
     # Initialize omegas
-    if init == 1:
-        omega_plus[0, :] = (0.5 / K) * np.arange(K)
-    elif init == 2:
-        omega_plus[0, :] = np.sort(
-            np.exp(np.log(fs) + (np.log(0.5) - np.log(fs)) * np.random.rand(K))
-        )
-    else:
-        omega_plus[0, :] = 0
+    omega_list = np.zeros((max_iter + 1, num_modes))
 
-    if DC:
-        omega_plus[0, 0] = 0
+    if init == 1:  # Linear
+        omega_list[0, :] = np.linspace(0, 0.5, num_modes)
+    elif init == 2:  # Exponential
+        omega_list[0, :] = 0.5 * np.logspace(-3, 0, num_modes)
+    else:  # constant
+        omega_list[0, :] = 0
 
+    #--- Frequency domain ---
+    sampling_freq = 1.0 / num_tpoints  # Sampling frequency
+    num_fpoints = num_tpoints + 1
+    f_points = np.linspace(0,0.5, num_fpoints)
+
+    signal_hat = _to_freq_domain(signal)
+
+    modes_hat = np.zeros((num_modes, num_channels, num_fpoints), dtype=complex)
+
+
+    #=== MVDM algorithm ===
     # Start with empty dual variables
-    lambda_hat = np.zeros((N, C, T), dtype=complex)
-    uDiff = tol + np.finfo(float).eps # Stopping criterion
+    lambda_hat = np.zeros((max_iter + 1, num_channels, num_fpoints), dtype=complex)
+    residual_diff = tolerance + np.finfo(float).eps # Stopping criterion
     n = 0  # Loop counter
-    sum_uk = np.zeros((C, T), dtype=complex)  # Accumulator
 
-    # Main loop of MVMD
-    while uDiff > tol and n < N - 1:
-        sum_uDiff = 0.
+    while n < max_iter and residual_diff > tolerance:
+        residual_diff = 0
 
         # Loop over the modes
-        for k in range(K):
-            # Update mode accumulator
-            sum_uk = np.sum(np.delete(u_hat_plus, k, axis=0), axis=0)
+        for k in range(num_modes):
+            #--- Mode update ---
+            aux_mode_hat = np.copy(modes_hat[k, :, :])
+            modes_hat[k, :, :] = 0 # Remove cotribution from the previous iteration
 
-            # Update spectrum of mode through Wiener filter of residuals
-            numerator = f_hat_plus - sum_uk - 0.5*lambda_hat[n, :, :]
-            denominator = 1 + alpha * (f_points - omega_plus[n, k])**2
+            # Update mode
+            modes_hat[k, :, :] = signal_hat - np.sum(modes_hat, axis=0) - 0.5*lambda_hat[n, :, :]
+            modes_hat[k, :, :] /= 1 + alpha * (f_points - omega_list[n, k]) ** 2
 
-            # Update new mode
-            u_hat_new = numerator / denominator
+            # Update residual
+            residual_diff += np.sum(np.abs(modes_hat[k, :, :] - aux_mode_hat) ** 2)
 
-            # Update modes
-            sum_uDiff += np.sum(np.abs(u_hat_new - u_hat_plus[k, :, :]) ** 2)
-            u_hat_plus[k, :, :] = u_hat_new
+            #--- Update central frequencies ---
+            module_mode_hat = np.abs(modes_hat[k, :, :]) ** 2
 
-            # Update center frequencies
-            if not DC or k > 0:
-                module_u_hat = np.abs(u_hat_plus[k, :, T // 2:]) ** 2
-
-                numerator = np.sum(np.dot(module_u_hat, f_points[T // 2:]))
-                denominator = np.sum(module_u_hat)
-
-                omega_plus[n + 1, k] = numerator / denominator
+            omega_list[n + 1, k] = np.sum(np.dot(module_mode_hat, f_points))
+            omega_list[n + 1, k] /= np.sum(module_mode_hat)
 
             # Dual ascent
             lambda_hat[n+1, :, :] = (
-                lambda_hat[n, :, :] + tau * (np.sum(u_hat_plus, axis=0) - f_hat_plus)
+                lambda_hat[n, :, :] + tau * (np.sum(modes_hat, axis=0) - signal_hat)
             )
          
         # Loop counter update
         n += 1
 
-        # Convergence check
-        uDiff = (1.0 / T) * sum_uDiff
+        # Convergence modulation
+        residual_diff /= num_tpoints
         
 
     # Post-processing
-    omega = omega_plus[:n, :] / fs
+    omega = omega_list[:n, :] / sampling_freq
 
-    # Order the results of omoga list, based on the final result
+    # Order the frequency list based on teh last results
     idx = np.argsort(omega[-1, :])
     omega = omega[:, idx]
 
     # Signal reconstruction
-    u_hat_full = np.zeros((K, C, T), dtype=complex)
-    T2 = T // 2
-
-    u_hat_full[:, :, T2:] = u_hat_plus[:, :, T2:]
-    u_hat_full[:, :, T2-1:0:-1] = np.conj(u_hat_plus[:, :, T2+1:])
-    u_hat_full[:, :, 0] = np.conj(u_hat_plus[:, :, -1])
-
-    # Compute the modes
-    u = np.zeros((K, C, u_hat_full.shape[2]))
-    for k in range(K):
-        for c in range(C):
-            u_temp = np.fft.ifft(np.fft.ifftshift(u_hat_full[k, c, :]))
-            u[k, c, :] = np.real(u_temp)
+    modes_list = np.array([_to_time_domain(m_hat) for m_hat in modes_hat])
 
     # Order modes
-    u = u[idx, :, :]
-
-    # Remove mirror part
-    T4 = T // 4
-    u = u[:, :, T4:3 * T4]
-
-    # Recompute spectra
-    u_hat = np.zeros((K, C, u.shape[2]), dtype=complex)
-    for k in range(K):
-        for c in range(C):
-            u_hat[k, c, :] = np.fft.fftshift(np.fft.fft(u[k, c, :]))
+    modes_list = modes_list[idx, :, :]
             
-    return u, u_hat, omega
+    return modes_list, modes_hat, omega
 
+
+def _to_freq_domain(signal, pad_mode='symmetric'):
+    # Dimension
+    tpoints = signal.shape[1]
+
+    if pad_mode is None:
+        full_signal = signal
+    else:
+        full_signal = np.pad(signal, pad_width=((0, 0), (tpoints // 2, tpoints - tpoints // 2)), mode=pad_mode)
+
+    signal_hat = np.fft.fft(full_signal, axis=1)[:, :tpoints + 1]
+
+    return signal_hat
+
+
+def _to_time_domain(signal_hat, extended=False):
+    channels, fpoints = signal_hat.shape
+    red_ft = fpoints - 1
+
+    # Construct Hermitian-symmetric assuming the signal is real
+    full_signal_hat = np.zeros((channels, 2 * red_ft), dtype=complex)
+
+    full_signal_hat[:, red_ft:] = signal_hat[:, :red_ft]
+    full_signal_hat[:, :red_ft] = np.conj(signal_hat[:, red_ft:0:-1])
+
+    # Inverse FFT to reconstruct the time-domain signal
+    shifted_full_signal_hat = np.fft.ifftshift(full_signal_hat, axes=1)
+
+    signal = np.real(np.fft.ifft(shifted_full_signal_hat, axis=1))
+
+    if not extended:
+        signal = signal[:, (red_ft // 2):(3 * red_ft // 2)]
+
+    return signal
