@@ -30,7 +30,7 @@ from mvmd import mvmd
 signal = np.random.rand(3, 100)  # 3 channels, 100 samples
 
 # Decompose the signal
-modes, modes_hat, omega = mvmd(signal, num_modes=3, alpha=2000, tolerance=1e-3)
+modes, modes_hat, omega = mvmd(signal, num_modes=3, alpha=2000, tolerance=1e-3, sampling_rate=1)
 ```
 
 ## Parameters
@@ -42,7 +42,10 @@ modes, modes_hat, omega = mvmd(signal, num_modes=3, alpha=2000, tolerance=1e-3)
 - `alpha` : float
   - Bandwidth constraint parameter.
 - `tolerance` : float
-  - Stopping criterion for the dual ascent.
+  - Stopping criterion for the dual ascent. Default is 1e-3.
+- `sampling_rate` : float 
+  - Sampling rate of the signal in seconds. Default is 1. 
+  - This parameter allows the user to adjust the returned frequencies based on the actual sampling rate of the signal.
 
 **Optional parameters**
 - `init` : int
