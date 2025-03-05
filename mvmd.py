@@ -1,6 +1,6 @@
 import numpy as np
 
-def mvmd(signal, num_modes, alpha, tolerance=1e-3, init=0, tau=1e-2, verbose=False):
+def mvmd(signal, num_modes, alpha, init=0, sampling_rate=1, tolerance=1e-3, tau=1e-2, verbose=False):
     """
     Multivariate Variational Mode Decomposition (MVMD)
 
@@ -67,7 +67,6 @@ def mvmd(signal, num_modes, alpha, tolerance=1e-3, init=0, tau=1e-2, verbose=Fal
         omega_list[0, :] = 0
 
     #--- Frequency domain ---
-    sampling_freq = 1.0 / num_tpoints  # Sampling frequency
     num_fpoints = num_tpoints + 1
     f_points = np.linspace(0,0.5, num_fpoints)
 
@@ -117,7 +116,7 @@ def mvmd(signal, num_modes, alpha, tolerance=1e-3, init=0, tau=1e-2, verbose=Fal
         
 
     # Post-processing
-    omega = omega_list[:n, :] / sampling_freq
+    omega = omega_list[:n, :] / sampling_rate
 
     # Order the frequency list based on teh last results
     idx = np.argsort(omega[-1, :])
